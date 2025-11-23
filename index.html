@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cybernetic Hand AR Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+      crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+      crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+      body {
+        background-color: #000;
+        color: #00ffcc;
+        font-family: 'Share Tech Mono', monospace;
+        overflow: hidden;
+        margin: 0;
+        padding: 0;
+      }
+
+      #canvas-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #000;
+      }
+
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        /*transform: scaleX(-1); /* Mirror effect */
+      }
+
+      video {
+        display: none;
+      }
+
+      .hud-overlay {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 20;
+        pointer-events: none;
+        text-shadow: 0 0 2px #000, 0 0 5px #000;
+      }
+
+      .hud-box {
+        border: 1px solid #00ffcc;
+        padding: 10px;
+        background: rgba(0, 20, 20, 0.4);
+        box-shadow: 0 0 10px #00ffcc;
+        margin-bottom: 10px;
+        backdrop-filter: blur(2px);
+      }
+
+      .controls {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        z-index: 30;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid #00ffcc;
+        padding: 15px;
+        border-radius: 5px;
+        backdrop-filter: blur(4px);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      button {
+        background: rgba(0, 0, 0, 0.5);
+        color: #00ffcc;
+        border: 1px solid #00ffcc;
+        padding: 5px 15px;
+        cursor: pointer;
+        font-family: 'Share Tech Mono', monospace;
+        text-transform: uppercase;
+        transition: all 0.3s;
+        font-size: 12px;
+      }
+
+      button:hover {
+        background: #00ffcc;
+        color: #000;
+        box-shadow: 0 0 15px #00ffcc;
+      }
+
+      button.active {
+        background: #00ffcc;
+        color: #000;
+        box-shadow: 0 0 10px #00ffcc;
+      }
+
+      .loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        color: #00ffcc;
+        text-align: center;
+        z-index: 50;
+        animation: blink 1s infinite;
+        text-shadow: 0 0 10px #000;
+      }
+
+      .error-message {
+        display: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(50, 0, 0, 0.9);
+        border: 2px solid #ff0055;
+        padding: 20px;
+        color: #ff0055;
+        text-align: center;
+        z-index: 100;
+        max-width: 80%;
+      }
+
+      @keyframes blink {
+        0% {
+          opacity: 0.3;
+        }
+
+        50% {
+          opacity: 1;
+        }
+
+        100% {
+          opacity: 0.3;
+        }
+      }
+
+      .system-status {
+        color: #ff0055;
+      }
+
+      .orange-text {
+        color: #ffaa00;
+      }
+
+      .blue-text {
+        color: #0088ff;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <div id="loading" class="loading">
+      <div>INITIALIZING NEURAL LINK...</div>
+      <div style="font-size: 14px; margin-top: 10px;">[Please Allow Camera Access]</div>
+    </div>
+
+    <div id="error-display" class="error-message">
+      <h2 class="text-xl font-bold mb-2">CRITICAL ERROR</h2>
+      <p id="error-text" class="mb-4 text-sm">Camera unavailable.</p>
+      <button onclick="location.reload()">REBOOT SYSTEM</button>
+    </div>
+
+    <div id="canvas-container">
+      <video id="input_video" playsinline></video>
+      <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div class="hud-overlay">
+      <div class="hud-box">
+        <h1 class="text-2xl font-bold mb-1">PROJECT: MK-HAND</h1>
+        <div class="text-xs">SYS.VER: 5.0.1 // HOLO-RING</div>
+        <div class="text-xs mt-1">FPS: <span id="fps-counter">00</span></div>
+      </div>
+      <div class="hud-box" style="width: 220px;">
+        <div class="text-sm border-b border-[#00ffcc] mb-2">BIO-METRICS</div>
+        <div class="flex justify-between text-xs">
+          <span>L-HAND:</span> <span id="l-hand-status" class="system-status">OFFLINE</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span>R-HAND:</span> <span id="r-hand-status" class="system-status">OFFLINE</span>
+        </div>
+        <div class="flex justify-between text-xs mt-2">
+          <span>GESTURE:</span> <span id="gesture-display">NONE</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div>
+        <div class="text-xs mb-1 text-center">RENDER MODE</div>
+        <div class="flex gap-2 justify-center">
+          <button id="btn-tech" onclick="setMode('tech')" class="active">MECH</button>
+          <button id="btn-skeleton" onclick="setMode('skeleton')">X-RAY</button>
+          <button id="btn-particles" onclick="setMode('particles')">NEON</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-xs mb-1 text-center">ANALYSIS TOOLS</div>
+        <div class="flex gap-2 justify-center">
+          <button id="btn-angle" onclick="toggleAngle()" class="active">ANGLE: ON</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const videoElement = document.getElementById('input_video');
+      const canvasElement = document.getElementById('output_canvas');
+      const canvasCtx = canvasElement.getContext('2d');
+      const loadingScreen = document.getElementById('loading');
+      const errorDisplay = document.getElementById('error-display');
+      const errorText = document.getElementById('error-text');
+      const fpsCounter = document.getElementById('fps-counter');
+      const gestureDisplay = document.getElementById('gesture-display');
+
+      let currentMode = 'tech';
+      let showAngleAnalysis = true;
+
+      let lastTime = 0;
+      let frameCount = 0;
+      let fpsTimer = 0;
+
+      // Ring Animation States
+      let ringAnimations = {
+        left: { active: false, scale: 0, alpha: 0 },
+        right: { active: false, scale: 0, alpha: 0 }
+      };
+
+      // Color Palette
+      const C_CYAN = '#00ffcc';
+      const C_RED = '#ff0055';
+      const C_BLUE = '#0088ff';
+      const C_WHITE = '#ffffff';
+      const C_ORANGE = '#ffaa00';
+
+      function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('btn-tech').className = mode === 'tech' ? 'active' : '';
+        document.getElementById('btn-skeleton').className = mode === 'skeleton' ? 'active' : '';
+        document.getElementById('btn-particles').className = mode === 'particles' ? 'active' : '';
+      }
+
+      function toggleAngle() {
+        showAngleAnalysis = !showAngleAnalysis;
+        const btn = document.getElementById('btn-angle');
+        if (showAngleAnalysis) {
+          btn.innerText = "ANGLE: ON";
+          btn.className = "active";
+        } else {
+          btn.innerText = "ANGLE: OFF";
+          btn.className = "";
+        }
+      }
+
+      function showError(message) {
+        loadingScreen.style.display = 'none';
+        errorDisplay.style.display = 'block';
+        errorText.innerText = message;
+      }
+
+      // Check if hand is open (PALM / PAPER gesture)
+      function isHandOpen(landmarks) {
+        // Simplified check: Are fingertips above their respective PIP joints?
+        const wrist = landmarks[0];
+        const tips = [4, 8, 12, 16, 20];
+        const pips = [2, 6, 10, 14, 18]; // PIP or equivalent for thumb
+
+        let openFingers = 0;
+
+        // Calculate distance function
+        const dist = (a, b) => Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+
+        for (let i = 0; i < 5; i++) {
+          // If tip is further from wrist than PIP, finger is likely extended
+          if (dist(landmarks[tips[i]], wrist) > dist(landmarks[pips[i]], wrist)) {
+            openFingers++;
+          }
+        }
+
+        return openFingers >= 4;
+      }
+
+      function onResults(results) {
+        if (loadingScreen.style.display !== 'none') loadingScreen.style.display = 'none';
+
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.globalAlpha = 1.0;
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        updateHUD(results);
+
+        // Reset animation triggers if hands lost
+        let foundLeft = false;
+        let foundRight = false;
+
+        if (results.multiHandLandmarks) {
+          for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
+            const label = results.multiHandedness[index].label; // Left or Right
+            const isLeft = label === 'Left';
+            if (isLeft) foundLeft = true; else foundRight = true;
+
+            // Draw base hand
+            if (currentMode === 'tech') drawMechanicalHand(landmarks);
+            else if (currentMode === 'skeleton') drawXRayHand(landmarks);
+            else if (currentMode === 'particles') drawNeonHand(landmarks);
+
+            if (showAngleAnalysis) drawThumbIndexAngle(landmarks);
+
+            // Check for "Open Hand" gesture to trigger Cyber Ring
+            const isOpen = isHandOpen(landmarks);
+            const animState = isLeft ? ringAnimations.left : ringAnimations.right;
+
+            // Update animation state
+            if (isOpen) {
+              animState.active = true;
+              animState.scale = Math.min(animState.scale + 0.1, 1.0); // Smooth scale up
+              animState.alpha = Math.min(animState.alpha + 0.05, 1.0); // Fade in
+
+              gestureDisplay.innerText = "HOLO-RING ACTIVE";
+              gestureDisplay.className = "blue-text";
+              gestureDisplay.style.color = C_BLUE;
+            } else {
+              animState.active = false;
+              animState.scale = Math.max(animState.scale - 0.1, 0); // Scale down
+              animState.alpha = Math.max(animState.alpha - 0.1, 0); // Fade out
+
+              if (!foundLeft && !foundRight) {
+                gestureDisplay.innerText = "NONE";
+                gestureDisplay.className = "";
+                gestureDisplay.style.color = C_CYAN;
+              }
+            }
+
+            // Draw Ring if visible
+            if (animState.alpha > 0.01) {
+              drawCyberRing(landmarks, animState.scale, animState.alpha);
+            }
+          }
+        }
+
+        const now = performance.now();
+        frameCount++;
+        if (now - fpsTimer > 1000) {
+          fpsCounter.innerText = frameCount;
+          frameCount = 0;
+          fpsTimer = now;
+        }
+        canvasCtx.restore();
+      }
+
+      function updateHUD(results) {
+        const lHand = document.getElementById('l-hand-status');
+        const rHand = document.getElementById('r-hand-status');
+        let leftFound = false;
+        let rightFound = false;
+
+        if (results.multiHandedness) {
+          for (const hand of results.multiHandedness) {
+            if (hand.label === 'Left') leftFound = true;
+            if (hand.label === 'Right') rightFound = true;
+          }
+        }
+        lHand.innerText = leftFound ? "CONNECTED" : "SEARCHING...";
+        lHand.className = leftFound ? "" : "system-status";
+        lHand.style.color = leftFound ? C_CYAN : C_RED;
+        rHand.innerText = rightFound ? "CONNECTED" : "SEARCHING...";
+        rHand.className = rightFound ? "" : "system-status";
+        rHand.style.color = rightFound ? C_CYAN : C_RED;
+      }
+
+      // --- CYBER RING EFFECT ---
+
+      function drawCyberRing(landmarks, scale, alpha) {
+        const getCoord = (idx) => ({
+          x: landmarks[idx].x * canvasElement.width,
+          y: landmarks[idx].y * canvasElement.height
+        });
+
+        // Center of palm (approximate)
+        const wrist = getCoord(0);
+        const middleMCP = getCoord(9);
+        const cx = (wrist.x + middleMCP.x) / 2;
+        const cy = (wrist.y + middleMCP.y) / 2;
+
+        // Base radius size based on hand size
+        // Reduced multiplier from 2.5 to 1.6 for smaller rings
+        const handSize = Math.sqrt(Math.pow(wrist.x - middleMCP.x, 2) + Math.pow(wrist.y - middleMCP.y, 2)) * 1.2;
+        const baseRadius = handSize * scale;
+
+        const time = performance.now() / 1000;
+
+        canvasCtx.save();
+        canvasCtx.translate(cx, cy);
+
+        // GLOW EFFECT
+        canvasCtx.shadowBlur = 15;
+        canvasCtx.shadowColor = C_BLUE;
+
+        // Ring 1: Outer rapid dashed ring
+        canvasCtx.beginPath();
+        canvasCtx.rotate(time); // Rotate continuously
+        const r1 = baseRadius * 1.8;
+        canvasCtx.arc(0, 0, r1, 0, Math.PI * 2);
+        canvasCtx.strokeStyle = `rgba(0, 136, 255, ${alpha * 0.8})`;
+        canvasCtx.lineWidth = 2;
+        canvasCtx.setLineDash([20, 30]);
+        canvasCtx.stroke();
+        canvasCtx.rotate(-time); // Reset rotation for next ring
+
+        // Ring 2: Middle thick segmented ring
+        canvasCtx.beginPath();
+        canvasCtx.rotate(-time * 0.5);
+        const r2 = baseRadius * 1.4;
+        // Draw 3 segments
+        for (let i = 0; i < 3; i++) {
+          canvasCtx.beginPath();
+          canvasCtx.arc(0, 0, r2, (i * (Math.PI * 2 / 3)), (i * (Math.PI * 2 / 3)) + 1.5);
+          canvasCtx.strokeStyle = `rgba(0, 255, 255, ${alpha * 0.6})`;
+          canvasCtx.lineWidth = 6; // Slightly thinner line width
+          canvasCtx.setLineDash([]);
+          canvasCtx.stroke();
+        }
+        canvasCtx.rotate(time * 0.5);
+
+        // Ring 3: Inner solid thin ring
+        canvasCtx.beginPath();
+        const r3 = baseRadius * 1.0;
+        canvasCtx.arc(0, 0, r3, 0, Math.PI * 2);
+        canvasCtx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.9})`;
+        canvasCtx.lineWidth = 1;
+        canvasCtx.stroke();
+
+        // Center Hexagon or Data
+        canvasCtx.beginPath();
+        canvasCtx.rotate(time * 2);
+        const r4 = baseRadius * 0.3;
+        for (let i = 0; i < 6; i++) {
+          canvasCtx.lineTo(r4 * Math.cos(i * Math.PI / 3), r4 * Math.sin(i * Math.PI / 3));
+        }
+        canvasCtx.closePath();
+        canvasCtx.strokeStyle = `rgba(0, 136, 255, ${alpha})`;
+        canvasCtx.stroke();
+
+        // Add some text particles around
+        if (scale > 0.8) {
+          canvasCtx.fillStyle = `rgba(0, 255, 255, ${alpha})`;
+          canvasCtx.font = "10px Share Tech Mono";
+          canvasCtx.shadowBlur = 0;
+          canvasCtx.rotate(-time * 2); // Still relative to center
+          canvasCtx.fillText("SYSTEM:ONLINE", r2 + 10, 0);
+          canvasCtx.fillText("TARGET:LOCK", -r2 - 60, 0);
+        }
+
+        canvasCtx.restore();
+      }
+
+      // --- STANDARD DRAWING FUNCTIONS ---
+
+      function drawThumbIndexAngle(landmarks) {
+        const getCoord = (idx) => ({
+          x: landmarks[idx].x * canvasElement.width,
+          y: landmarks[idx].y * canvasElement.height
+        });
+        const wrist = getCoord(0);
+        const thumbTip = getCoord(4);
+        const indexTip = getCoord(8);
+        const vThumb = { x: thumbTip.x - wrist.x, y: thumbTip.y - wrist.y };
+        const vIndex = { x: indexTip.x - wrist.x, y: indexTip.y - wrist.y };
+        const thetaThumb = Math.atan2(vThumb.y, vThumb.x);
+        const thetaIndex = Math.atan2(vIndex.y, vIndex.x);
+        const dot = vThumb.x * vIndex.x + vThumb.y * vIndex.y;
+        const magThumb = Math.sqrt(vThumb.x * vThumb.x + vThumb.y * vThumb.y);
+        const magIndex = Math.sqrt(vIndex.x * vIndex.x + vIndex.y * vIndex.y);
+        let angleDeg = Math.acos(dot / (magThumb * magIndex)) * (180 / Math.PI);
+        if (isNaN(angleDeg)) angleDeg = 0;
+
+        const radius = (magThumb + magIndex) / 2 * 0.7;
+
+        canvasCtx.beginPath();
+        canvasCtx.arc(wrist.x, wrist.y, radius, Math.min(thetaThumb, thetaIndex), Math.max(thetaThumb, thetaIndex));
+        canvasCtx.strokeStyle = C_ORANGE;
+        canvasCtx.lineWidth = 3;
+        canvasCtx.setLineDash([5, 5]);
+        canvasCtx.stroke();
+        canvasCtx.setLineDash([]);
+
+        const midTheta = (thetaThumb + thetaIndex) / 2;
+        const textX = wrist.x + Math.cos(midTheta) * (radius + 20);
+        const textY = wrist.y + Math.sin(midTheta) * (radius + 20);
+        canvasCtx.fillStyle = C_ORANGE;
+        canvasCtx.font = "bold 14px Share Tech Mono";
+        canvasCtx.shadowColor = "black";
+        canvasCtx.shadowBlur = 4;
+        canvasCtx.fillText(angleDeg.toFixed(1) + "°", textX - 15, textY);
+        canvasCtx.shadowBlur = 0;
+      }
+
+      function drawMechanicalHand(landmarks) {
+        const getCoord = (idx) => ({ x: landmarks[idx].x * canvasElement.width, y: landmarks[idx].y * canvasElement.height });
+        const connections = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20], [5, 9], [9, 13], [13, 17]];
+
+        canvasCtx.lineCap = 'butt';
+        connections.forEach(([start, end]) => {
+          const s = getCoord(start);
+          const e = getCoord(end);
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(s.x, s.y);
+          canvasCtx.lineTo(e.x, e.y);
+          canvasCtx.strokeStyle = 'rgba(10, 20, 20, 0.9)';
+          canvasCtx.lineWidth = 14;
+          canvasCtx.stroke();
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(s.x, s.y);
+          canvasCtx.lineTo(e.x, e.y);
+          canvasCtx.strokeStyle = 'rgba(0, 255, 204, 0.4)';
+          canvasCtx.lineWidth = 16;
+          canvasCtx.stroke();
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(s.x, s.y);
+          canvasCtx.lineTo(e.x, e.y);
+          canvasCtx.strokeStyle = C_CYAN;
+          canvasCtx.lineWidth = 2;
+          canvasCtx.stroke();
+        });
+
+        for (let i = 0; i < landmarks.length; i++) {
+          const p = getCoord(i);
+          canvasCtx.fillStyle = '#111';
+          canvasCtx.strokeStyle = C_CYAN;
+          canvasCtx.lineWidth = 2;
+          canvasCtx.beginPath(); canvasCtx.arc(p.x, p.y, 6, 0, 2 * Math.PI); canvasCtx.fill(); canvasCtx.stroke();
+          canvasCtx.beginPath(); canvasCtx.arc(p.x, p.y, 12, 0, 2 * Math.PI); canvasCtx.strokeStyle = 'rgba(0, 255, 204, 0.5)'; canvasCtx.stroke();
+
+          if ([4, 8, 12, 16, 20].includes(i)) {
+            canvasCtx.fillStyle = C_CYAN;
+            canvasCtx.font = 'bold 12px Share Tech Mono';
+            canvasCtx.shadowColor = "black";
+            canvasCtx.shadowBlur = 4;
+            canvasCtx.fillText(`TRK:${i}`, p.x + 15, p.y);
+            canvasCtx.shadowBlur = 0;
+            canvasCtx.strokeStyle = C_RED;
+            canvasCtx.lineWidth = 2;
+            canvasCtx.beginPath(); canvasCtx.moveTo(p.x - 8, p.y); canvasCtx.lineTo(p.x + 8, p.y);
+            canvasCtx.moveTo(p.x, p.y - 8); canvasCtx.lineTo(p.x, p.y + 8); canvasCtx.stroke();
+          }
+        }
+        const wrist = getCoord(0);
+        canvasCtx.fillStyle = 'rgba(0, 20, 20, 0.85)';
+        canvasCtx.strokeStyle = C_CYAN;
+        canvasCtx.fillRect(wrist.x - 40, wrist.y, 80, 50);
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeRect(wrist.x - 40, wrist.y, 80, 50);
+        canvasCtx.fillStyle = C_CYAN;
+        canvasCtx.font = '10px monospace';
+        for (let k = 0; k < 3; k++) {
+          canvasCtx.fillText(Math.random().toString(16).substr(2, 8).toUpperCase(), wrist.x - 35, wrist.y + 15 + (k * 12));
+        }
+      }
+
+      function drawXRayHand(landmarks) {
+        const getCoord = (idx) => ({ x: landmarks[idx].x * canvasElement.width, y: landmarks[idx].y * canvasElement.height });
+        const connections = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20], [5, 9], [9, 13], [13, 17], [0, 5], [0, 17]];
+        canvasCtx.shadowBlur = 10;
+        canvasCtx.shadowColor = C_WHITE;
+        connections.forEach(([start, end]) => {
+          const s = getCoord(start);
+          const e = getCoord(end);
+          canvasCtx.beginPath(); canvasCtx.moveTo(s.x, s.y); canvasCtx.lineTo(e.x, e.y); canvasCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; canvasCtx.lineWidth = 10; canvasCtx.stroke();
+          canvasCtx.beginPath(); canvasCtx.moveTo(s.x, s.y); canvasCtx.lineTo(e.x, e.y); canvasCtx.strokeStyle = '#fff'; canvasCtx.lineWidth = 3; canvasCtx.stroke();
+        });
+        canvasCtx.shadowBlur = 0;
+      }
+
+      function drawNeonHand(landmarks) {
+        const getCoord = (idx) => ({ x: landmarks[idx].x * canvasElement.width, y: landmarks[idx].y * canvasElement.height });
+        const wrist = getCoord(0);
+        for (let i = 1; i < landmarks.length; i++) {
+          const p = getCoord(i);
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(wrist.x, wrist.y);
+          canvasCtx.lineTo(p.x, p.y);
+          canvasCtx.strokeStyle = `hsla(${(frameCount * 2 + i * 10) % 360}, 100%, 50%, 0.6)`;
+          canvasCtx.lineWidth = 2;
+          canvasCtx.stroke();
+          canvasCtx.beginPath(); canvasCtx.arc(p.x, p.y, 5, 0, 2 * Math.PI); canvasCtx.fillStyle = `hsla(${(frameCount * 5) % 360}, 100%, 80%, 1)`; canvasCtx.fill();
+        }
+      }
+
+      const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+      hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+      hands.onResults(onResults);
+      const camera = new Camera(videoElement, { onFrame: async () => await hands.send({ image: videoElement }), width: 1280, height: 720 });
+      camera.start().catch(err => showError("CAMERA ERROR"));
+    </script>
+  </body>
+
+</html>

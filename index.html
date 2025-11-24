@@ -4,9 +4,8 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cybernetic Hand AR Interface</title>
+    <title>Cybernetic Hand AR Interface v2</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- MediaPipe Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
       crossorigin="anonymous"></script>
@@ -42,7 +41,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        /* transform: scaleX(-1); Mirror effect removed */
       }
 
       video {
@@ -79,19 +77,23 @@
         backdrop-filter: blur(4px);
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 15px;
+        /* Gapを少し広げました */
+        width: 200px;
+        /* 幅を指定してスライダーを見やすく */
       }
 
       button {
         background: rgba(0, 0, 0, 0.5);
         color: #00ffcc;
         border: 1px solid #00ffcc;
-        padding: 5px 15px;
+        padding: 5px 10px;
         cursor: pointer;
         font-family: 'Share Tech Mono', monospace;
         text-transform: uppercase;
         transition: all 0.3s;
-        font-size: 12px;
+        font-size: 11px;
+        flex: 1;
       }
 
       button:hover {
@@ -104,6 +106,33 @@
         background: #00ffcc;
         color: #000;
         box-shadow: 0 0 10px #00ffcc;
+      }
+
+      /* Range Slider Styling */
+      input[type=range] {
+        -webkit-appearance: none;
+        width: 100%;
+        background: transparent;
+      }
+
+      input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 16px;
+        width: 16px;
+        border-radius: 50%;
+        background: #00ffcc;
+        cursor: pointer;
+        margin-top: -6px;
+        box-shadow: 0 0 10px #00ffcc;
+      }
+
+      input[type=range]::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        background: rgba(0, 255, 204, 0.3);
+        border-radius: 2px;
+        border: 1px solid #00ffcc;
       }
 
       .loading {
@@ -187,7 +216,7 @@
     <div class="hud-overlay">
       <div class="hud-box">
         <h1 class="text-2xl font-bold mb-1">PROJECT: MK-HAND</h1>
-        <div class="text-xs">SYS.VER: 9.0.0 // PARTICLE OVERDRIVE</div>
+        <div class="text-xs">SYS.VER: 9.1.0 // PARAMETER OVERRIDE</div>
         <div class="text-xs mt-1">FPS: <span id="fps-counter">00</span></div>
       </div>
       <div class="hud-box" style="width: 220px;">
@@ -220,6 +249,14 @@
           <button id="btn-angle" onclick="toggleAngle()" class="active">ANGLE: ON</button>
         </div>
       </div>
+
+      <div>
+        <div class="text-xs mb-1 text-center flex justify-between">
+          <span>HOLO SIZE</span>
+          <span id="scale-val-display" style="color:#fff;">1.20</span>
+        </div>
+        <input type="range" id="holo-scale-slider" min="0.5" max="3.0" step="0.1" value="1.2">
+      </div>
     </div>
 
     <script>
@@ -235,22 +272,32 @@
       let currentMode = 'tech';
       let showAngleAnalysis = true;
 
+      // --- スライダー用変数 ---
+      let holoScaleMultiplier = 1.2; // デフォルト値
+      const scaleSlider = document.getElementById('holo-scale-slider');
+      const scaleDisplay = document.getElementById('scale-val-display');
+
+      // スライダー操作イベント
+      scaleSlider.addEventListener('input', (e) => {
+        holoScaleMultiplier = parseFloat(e.target.value);
+        scaleDisplay.innerText = holoScaleMultiplier.toFixed(2);
+      });
+      // ---------------------
+
       let lastTime = 0;
       let frameCount = 0;
       let fpsTimer = 0;
 
       // Particle System
       const particles = [];
-      const MAX_PARTICLES = 200; // Increased from 60 to 200
+      const MAX_PARTICLES = 200;
 
       // Hologram Animation States
-      // type: 'none', 'ring', 'peace'
       let holoStates = {
         left: { type: 'none', active: false, scale: 0, alpha: 0, rotationSpeed: 0 },
         right: { type: 'none', active: false, scale: 0, alpha: 0, rotationSpeed: 0 }
       };
 
-      // Color Palette
       const C_CYAN = '#00ffcc';
       const C_RED = '#ff0055';
       const C_BLUE = '#0088ff';
@@ -284,7 +331,6 @@
         errorText.innerText = message;
       }
 
-      // Gesture Recognition
       const dist = (a, b) => Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
 
       function isHandOpen(landmarks) {
@@ -292,7 +338,6 @@
         const tips = [4, 8, 12, 16, 20];
         const pips = [2, 6, 10, 14, 18];
         let openFingers = 0;
-
         for (let i = 0; i < 5; i++) {
           if (dist(landmarks[tips[i]], wrist) > dist(landmarks[pips[i]], wrist)) openFingers++;
         }
@@ -301,17 +346,10 @@
 
       function isPeaceSign(landmarks) {
         const wrist = landmarks[0];
-
-        // Finger status checks
-        // 4: Thumb, 8: Index, 12: Middle, 16: Ring, 20: Pinky
-        // Index and Middle extended
         const indexExt = dist(landmarks[8], wrist) > dist(landmarks[6], wrist);
         const middleExt = dist(landmarks[12], wrist) > dist(landmarks[10], wrist);
-
-        // Ring and Pinky curled
         const ringCurled = dist(landmarks[16], wrist) < dist(landmarks[14], wrist);
         const pinkyCurled = dist(landmarks[20], wrist) < dist(landmarks[18], wrist);
-
         return indexExt && middleExt && ringCurled && pinkyCurled;
       }
 
@@ -322,19 +360,17 @@
           this.y = y;
           this.color = color;
           this.angle = Math.random() * Math.PI * 2;
-          this.speed = Math.random() * 4 + 1; // Faster particles
+          this.speed = Math.random() * 4 + 1;
           this.size = Math.random() * 2 + 1;
           this.life = 1.0;
-          this.decay = Math.random() * 0.03 + 0.01; // Slower decay
+          this.decay = Math.random() * 0.03 + 0.01;
         }
-
         update() {
           this.x += Math.cos(this.angle) * this.speed;
           this.y += Math.sin(this.angle) * this.speed;
           this.life -= this.decay;
           this.size *= 0.96;
         }
-
         draw(ctx) {
           ctx.beginPath();
           ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
@@ -356,8 +392,6 @@
             color1 = `rgba(100, 255, 255, ALPHA)`;
             color2 = `rgba(50, 100, 100, ALPHA)`;
           }
-
-          // Emit multiple particles per frame for density
           for (let i = 0; i < 5; i++) {
             particles.push(new Particle(x, y, i % 2 === 0 ? color1 : color2));
           }
@@ -421,7 +455,6 @@
             const palmX = (landmarks[0].x + landmarks[9].x) / 2 * canvasElement.width;
             const palmY = (landmarks[0].y + landmarks[9].y) / 2 * canvasElement.height;
 
-            // State Transitions
             if (targetType !== 'none') {
               if (animState.type !== targetType) {
                 animState.type = targetType;
@@ -444,17 +477,13 @@
                 emitParticles(palmX, palmY, 'cyan');
               }
             } else {
-              // Decay gesture
               animState.active = false;
               animState.scale = Math.max(animState.scale - 0.1, 0);
               animState.alpha = Math.max(animState.alpha - 0.1, 0);
               animState.rotationSpeed = Math.max(animState.rotationSpeed - 0.05, 0);
-
-              // Emit neutral particles for tracking trail even if no gesture
               emitParticles(palmX, palmY, 'neutral');
             }
 
-            // Draw Holograms based on state
             if (animState.alpha > 0.01) {
               if (animState.type === 'peace') {
                 drawPeaceHolo(landmarks, animState.scale, animState.alpha, animState.rotationSpeed);
@@ -465,7 +494,6 @@
           }
         }
 
-        // Update Gesture Display
         if (!foundLeft && !foundRight) {
           gestureDisplay.innerText = "NONE";
           gestureDisplay.className = "";
@@ -516,52 +544,44 @@
           y: landmarks[idx].y * canvasElement.height
         });
 
-        // Center on Index and Middle PIP/MCP area for the V-sign
-        // But Peace Symbol usually floats above the V? Let's put it on the palm center like the ring for stability
         const wrist = getCoord(0);
         const middleMCP = getCoord(9);
         const cx = (wrist.x + middleMCP.x) / 2;
         const cy = (wrist.y + middleMCP.y) / 2;
 
-        const handSize = Math.sqrt(Math.pow(wrist.x - middleMCP.x, 2) + Math.pow(wrist.y - middleMCP.y, 2)) * 1.2;
+        // 【変更点】 1.2 を holoScaleMultiplier 変数に変更
+        const handSize = Math.sqrt(Math.pow(wrist.x - middleMCP.x, 2) + Math.pow(wrist.y - middleMCP.y, 2)) * holoScaleMultiplier;
+
         const baseRadius = handSize * scale;
         const time = (performance.now() / 1000);
 
         canvasCtx.save();
         canvasCtx.translate(cx, cy);
 
-        // Global Glow
         canvasCtx.shadowBlur = 15;
         canvasCtx.shadowColor = C_GREEN;
 
-        // 1. Peace Symbol (CND)
-        // Vertical line down, two diagonal lines down
         const rSymbol = baseRadius * 0.7;
 
         canvasCtx.beginPath();
-        // Circle
         canvasCtx.arc(0, 0, rSymbol, 0, Math.PI * 2);
-        // Center Line (Top to Bottom)
         canvasCtx.moveTo(0, -rSymbol);
         canvasCtx.lineTo(0, rSymbol);
-        // Diagonals (Center to Bottom Left/Right)
-        const diagAngle = Math.PI / 4; // 45 deg from bottom center
+        const diagAngle = Math.PI / 4;
         canvasCtx.moveTo(0, 0);
-        canvasCtx.lineTo(rSymbol * Math.sin(diagAngle), rSymbol * Math.cos(diagAngle)); // Bottom Right
+        canvasCtx.lineTo(rSymbol * Math.sin(diagAngle), rSymbol * Math.cos(diagAngle));
         canvasCtx.moveTo(0, 0);
-        canvasCtx.lineTo(-rSymbol * Math.sin(diagAngle), rSymbol * Math.cos(diagAngle)); // Bottom Left
+        canvasCtx.lineTo(-rSymbol * Math.sin(diagAngle), rSymbol * Math.cos(diagAngle));
 
         canvasCtx.strokeStyle = `rgba(0, 255, 136, ${alpha})`;
         canvasCtx.lineWidth = 5;
         canvasCtx.lineCap = "round";
         canvasCtx.stroke();
 
-        // Inner Glow for symbol
         canvasCtx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
         canvasCtx.lineWidth = 2;
         canvasCtx.stroke();
 
-        // 2. Rotating Outer Ring
         canvasCtx.beginPath();
         canvasCtx.rotate(time * 0.5);
         canvasCtx.arc(0, 0, baseRadius * 1.0, 0, Math.PI * 2);
@@ -572,7 +592,6 @@
         canvasCtx.setLineDash([]);
         canvasCtx.rotate(-time * 0.5);
 
-        // 3. Decorative "Leaves" or Laurel Wreath hint (Tech style)
         const rLaurel = baseRadius * 1.3;
         const leaves = 8;
         canvasCtx.rotate(-time * 0.3);
@@ -595,7 +614,6 @@
         }
         canvasCtx.rotate(time * 0.3);
 
-        // 4. Floating Text
         if (scale > 0.8) {
           canvasCtx.font = "10px Share Tech Mono";
           canvasCtx.fillStyle = `rgba(0, 255, 136, ${alpha})`;
@@ -618,14 +636,16 @@
         const middleMCP = getCoord(9);
         const cx = (wrist.x + middleMCP.x) / 2;
         const cy = (wrist.y + middleMCP.y) / 2;
-        const handSize = Math.sqrt(Math.pow(wrist.x - middleMCP.x, 2) + Math.pow(wrist.y - middleMCP.y, 2)) * 1.6;
+
+        // 【変更点】 元は1.6でしたが、スライダー値に0.4を足して比率を保つように設定しました
+        const handSize = Math.sqrt(Math.pow(wrist.x - middleMCP.x, 2) + Math.pow(wrist.y - middleMCP.y, 2)) * (holoScaleMultiplier + 0.4);
+
         const baseRadius = handSize * scale;
         const time = (performance.now() / 1000);
 
         canvasCtx.save();
         canvasCtx.translate(cx, cy);
 
-        // --- Electric Finger Connections (Lightning) ---
         if (alpha > 0.3) {
           const tips = [4, 8, 12, 16, 20];
           canvasCtx.save();
@@ -633,7 +653,6 @@
 
           tips.forEach(idx => {
             const tip = getCoord(idx);
-            // Create erratic path
             canvasCtx.beginPath();
             canvasCtx.moveTo(cx, cy);
             const segments = 4;
@@ -641,7 +660,7 @@
               const t = i / segments;
               const nextX = cx + (tip.x - cx) * t;
               const nextY = cy + (tip.y - cy) * t;
-              const jitter = (Math.random() - 0.5) * 15 * scale; // Jitter amount
+              const jitter = (Math.random() - 0.5) * 15 * scale;
               if (i < segments) {
                 canvasCtx.lineTo(nextX + jitter, nextY + jitter);
               } else {
@@ -656,7 +675,6 @@
             canvasCtx.stroke();
             canvasCtx.shadowBlur = 0;
 
-            // Tip Glow
             canvasCtx.beginPath();
             canvasCtx.arc(tip.x, tip.y, 4, 0, Math.PI * 2);
             canvasCtx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
@@ -665,42 +683,35 @@
           canvasCtx.restore();
         }
 
-        // --- Holographic Shield Field ---
         const shieldGrad = canvasCtx.createRadialGradient(0, 0, baseRadius * 0.5, 0, 0, baseRadius * 1.8);
         shieldGrad.addColorStop(0, `rgba(0, 100, 255, 0)`);
         shieldGrad.addColorStop(0.8, `rgba(0, 100, 255, 0)`);
-        shieldGrad.addColorStop(1, `rgba(0, 200, 255, ${alpha * 0.1})`); // Very faint outer rim
+        shieldGrad.addColorStop(1, `rgba(0, 200, 255, ${alpha * 0.1})`);
         canvasCtx.beginPath();
         canvasCtx.arc(0, 0, baseRadius * 1.8, 0, Math.PI * 2);
         canvasCtx.fillStyle = shieldGrad;
         canvasCtx.fill();
 
-
-        // --- MAIN TURBINE UI ---
-
-        // Global Glow
         canvasCtx.shadowBlur = 10;
         canvasCtx.shadowColor = C_BLUE;
 
-        // 2. High-Speed Inner Data Ring (Counter Rotate)
         canvasCtx.beginPath();
         canvasCtx.rotate(-time * 2);
         const rInner = baseRadius * 0.6;
         canvasCtx.arc(0, 0, rInner, 0, Math.PI * 2);
         canvasCtx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
         canvasCtx.lineWidth = 1;
-        canvasCtx.setLineDash([5, 5, 1, 5]); // Complex dash
+        canvasCtx.setLineDash([5, 5, 1, 5]);
         canvasCtx.stroke();
         canvasCtx.rotate(time * 2);
 
-        // 3. Main Energy Ring (Thick, Pulsing)
         canvasCtx.setLineDash([]);
         const rMain = baseRadius * 0.9;
         const segments = 4;
         canvasCtx.rotate(time * 0.4);
         for (let i = 0; i < segments; i++) {
           const startAngle = i * (Math.PI * 2 / segments);
-          const endAngle = startAngle + (Math.PI * 2 / segments) - 0.3; // Gap
+          const endAngle = startAngle + (Math.PI * 2 / segments) - 0.3;
 
           canvasCtx.beginPath();
           canvasCtx.arc(0, 0, rMain, startAngle, endAngle);
@@ -708,7 +719,6 @@
           canvasCtx.lineWidth = 6;
           canvasCtx.stroke();
 
-          // Inner highlight line
           canvasCtx.beginPath();
           canvasCtx.arc(0, 0, rMain - 6, startAngle, endAngle);
           canvasCtx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
@@ -717,26 +727,21 @@
         }
         canvasCtx.rotate(-time * 0.4);
 
-        // 4. Gyroscopic 3D Rings
         canvasCtx.lineWidth = 1.5;
         canvasCtx.strokeStyle = `rgba(0, 255, 200, ${alpha * 0.5})`;
 
-        // Ring A
         canvasCtx.beginPath();
         canvasCtx.rotate(time * 0.8);
         canvasCtx.ellipse(0, 0, baseRadius * 1.2, baseRadius * 0.4, 0, 0, Math.PI * 2);
         canvasCtx.stroke();
         canvasCtx.rotate(-time * 0.8);
 
-        // Ring B (Offset)
         canvasCtx.beginPath();
         canvasCtx.rotate(-time * 0.6 + 1);
         canvasCtx.ellipse(0, 0, baseRadius * 1.2, baseRadius * 0.4, 0, 0, Math.PI * 2);
         canvasCtx.stroke();
         canvasCtx.rotate(time * 0.6 - 1);
 
-
-        // 5. Outer Data Cloud (Floating particles/text)
         const rOuter = baseRadius * 1.6;
         canvasCtx.rotate(time * 0.2);
         if (scale > 0.8) {
@@ -746,14 +751,12 @@
             const angle = i * (Math.PI * 2 / 8);
             const rx = rOuter * Math.cos(angle);
             const ry = rOuter * Math.sin(angle);
-            // Draw random hex byte
             const byte = Math.floor(Math.random() * 255).toString(16).toUpperCase();
             canvasCtx.fillText(byte, rx, ry);
           }
         }
         canvasCtx.rotate(-time * 0.2);
 
-        // 6. Cardinal Markers (North/South/East/West)
         const rMarkers = baseRadius * 1.8;
         for (let i = 0; i < 4; i++) {
           const angle = i * Math.PI / 2;
@@ -762,7 +765,7 @@
 
           canvasCtx.beginPath();
           canvasCtx.moveTo(mx, my);
-          canvasCtx.lineTo(mx * 1.1, my * 1.1); // Spikes outward
+          canvasCtx.lineTo(mx * 1.1, my * 1.1);
           canvasCtx.strokeStyle = `rgba(255, 0, 100, ${alpha})`;
           canvasCtx.lineWidth = 2;
           canvasCtx.stroke();
